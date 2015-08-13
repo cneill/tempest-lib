@@ -16,35 +16,38 @@ from __future__ import unicode_literals
 import json
 import re
 
-import tempest_lib.base
+# import tempest_lib.base
+
+# class FuzzFactory(tempest_lib.base.BaseTestCase):
 
 
-# class FuzzFactory(object):
-class FuzzFactory(tempest_lib.base.BaseTestCase):
+class FuzzFactory(object):
 
     default_fuzz_type = 'junk'
 
+    """
     types = [
         'ascii', 'content_types', 'date', 'huge', 'json_recursion', 'junk',
         'number', 'rce', 'sqli', 'traversal', 'url', 'xml', 'xss'
     ]
+    """
 
     def __init__(self):
-        self.fuzzers = {}
-        self.fuzzers['ascii'] = ASCIIFuzzer()
-        self.fuzzers['content_types'] = ContentTypeFuzzer()
-        self.fuzzers['date'] = DateFuzzer()
-        self.fuzzers['huge'] = HugeFuzzer()
-        self.fuzzers['json_recursion'] = JSONRecursionFuzzer()
-        self.fuzzers['junk'] = JunkFuzzer()
-        self.fuzzers['number'] = NumberFuzzer()
-        self.fuzzers['rce'] = RCEFuzzer()
-        self.fuzzers['sqli'] = SQLiFuzzer()
-        self.fuzzers['traversal'] = PathTraversalFuzzer()
-        self.fuzzers['url'] = URLFuzzer()
-        self.fuzzers['xml'] = XMLFuzzer()
-        self.fuzzers['xss'] = XSSFuzzer()
-        super(FuzzFactory, self)
+        self.fuzzers = {
+            'ascii': ASCIIFuzzer(),
+            'content_types': ContentTypeFuzzer(),
+            'date': DateFuzzer(),
+            'huge': HugeFuzzer(),
+            'json_recursion': JSONRecursionFuzzer(),
+            'junk': JunkFuzzer(),
+            'number': NumberFuzzer(),
+            'rce': RCEFuzzer(),
+            'sqli': SQLiFuzzer(),
+            'traversal': PathTraversalFuzzer(),
+            'url': URLFuzzer(),
+            'xml': XMLFuzzer(),
+            'xss': XSSFuzzer(),
+        }
 
     def get_datasets(self, fuzz_string_types):
         """Get multiple datasets for use in parameterized tests
@@ -88,9 +91,12 @@ class FuzzFactory(tempest_lib.base.BaseTestCase):
                                     'fuzz_type': fuzz_type, 'payload': string}
         return result
 
-    def verify_response(self, resp, fuzz_string_type='junk'):
+    def verify_response(self, status_code, text, fuzz_string_type='junk'):
         """
         Verify a response does not contain indications of vulnerability.
+
+        This method is for use with clients that don't throw exceptions upon
+        e.g. 400 or 500 HTTP status codes (ex: requests)
 
         :param resp: A "resp" object with "status_code" and "text"
         :param fuzz_string_type: one of the types defined in self.types
@@ -98,33 +104,32 @@ class FuzzFactory(tempest_lib.base.BaseTestCase):
             True if not.
         """
         fuzzer = self.fuzzers[fuzz_string_type]
-        return fuzzer.verify_response(resp)
-        # TODO(ccneill)
-        # DO MORE MIDDLEWARE STUFF HERE TO ALLOW BARB + TEMP_LIB TO USE
+        return fuzzer.verify_response(
+            {'status_code': status_code, 'text': text}
+        )
 
-    def verify_exception(self, method, exc, fuzz_type, *args, **kwargs):
+    # def verify_exception(self, method, exc, fuzz_type, *args, **kwargs):
+    def verify_exception(self, method, fuzz_type, *args, **kwargs):
         """
-        Verify that the proper exception is thrown from a negative test
+        Verify a response does not contain indications of vulnerability.
+
+        This method is for use with clients that throw exceptions upon e.g.
+        400 or 500 HTTP status codes (ex: tempest_lib's rest_client)
 
         :return tuple (response verified (bool), exception if any)
         """
         fuzzer = self.fuzzers[fuzz_type]
         try:
             resp, model = method(*args, **kwargs)
-            return (fuzzer.verify_response(self.get_standard_resp_obj(
-                resp.status, str(model.to_dict()))), None)
+            status = fuzzer.verify_response(
+                {'status_code': resp.status, 'text': str(model.to_dict())}
+            )
+            return (status, None)
         except Exception as e:
-            self.assertIsInstance(e, (exc))
-            status = fuzzer.verify_response(self.get_standard_resp_obj(
-                e.resp_body['code'], str(e.resp_body)))
-            self.assertTrue(status)
+            status = fuzzer.verify_response(
+                {'status_code': e.resp_body['code'], 'text': str(e.resp_body)}
+            )
             return (status, e)
-
-    def get_standard_resp_obj(self, status_code, text):
-        return {
-            'status_code': int(status_code),
-            'text': text
-        }
 
 
 class GenericFuzzer(object):
@@ -165,7 +170,6 @@ class GenericFuzzer(object):
 
     def verify_response(self, resp):
         if resp['status_code'] >= 500:
-            # raise Exception("HTTP ERROR: {0}".format(resp['status_code']))
             return False
         return True
 
@@ -271,9 +275,6 @@ class XSSFuzzer(GenericFuzzer):
     def verify_response(self, resp):
         if 'alert(1)' in resp['text']:
             return False
-            raise Exception(resp)
-            # raise Exception("Possible XSS Vulnerability")
-        raise Exception(resp)
         return True
 
 
@@ -301,7 +302,7 @@ class SQLiFuzzer(GenericFuzzer):
 
     def verify_response(self, resp):
         if 'sql' in resp['text'] or 'syntax' in resp['text']:
-            raise Exception("Possible SQLi vulnerability")
+            return False
         return True
 
 
@@ -315,7 +316,7 @@ class XMLFuzzer(GenericFuzzer):
 
     def verify_response(self, resp):
         if 'root:' in resp['text']:
-            raise Exception("Possible XXE vulnerability")
+            return False
         return True
 
 
@@ -360,7 +361,7 @@ class RCEFuzzer(GenericFuzzer):
 
     def verify_response(self, resp):
         if 'uid=' in resp['text']:
-            raise Exception("Possible RCE vulnerability")
+            return False
         return True
 
 
@@ -427,5 +428,5 @@ class PathTraversalFuzzer(GenericFuzzer):
 
     def verify_response(self, resp):
         if 'root:' in resp['text']:
-            raise Exception("Possible path traversal vulnerability")
+            return False
         return True
