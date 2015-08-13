@@ -16,19 +16,17 @@ from __future__ import unicode_literals
 import json
 import re
 
+import tempest_lib.base
 
-class FuzzFactory(object):
+
+# class FuzzFactory(object):
+class FuzzFactory(tempest_lib.base.BaseTestCase):
 
     default_fuzz_type = 'junk'
 
     types = [
         'ascii', 'content_types', 'date', 'huge', 'json_recursion', 'junk',
         'number', 'rce', 'sqli', 'traversal', 'url', 'xml', 'xss'
-    ]
-
-    named_types = [
-        'ascii', 'content_types', 'date', 'huge', 'junk', 'number', 'rce',
-        'sqli', 'traversal', 'url', 'xml', 'xss'
     ]
 
     def __init__(self):
@@ -46,6 +44,7 @@ class FuzzFactory(object):
         self.fuzzers['url'] = URLFuzzer()
         self.fuzzers['xml'] = XMLFuzzer()
         self.fuzzers['xss'] = XSSFuzzer()
+        super(FuzzFactory, self)
 
     def get_datasets(self, fuzz_string_types):
         """Get multiple datasets for use in parameterized tests
@@ -89,11 +88,43 @@ class FuzzFactory(object):
                                     'fuzz_type': fuzz_type, 'payload': string}
         return result
 
-    def verify_response(self, resp, fuzz_type='junk'):
-        fuzzer = self.fuzzers[fuzz_type]
+    def verify_response(self, resp, fuzz_string_type='junk'):
+        """
+        Verify a response does not contain indications of vulnerability.
+
+        :param resp: A "resp" object with "status_code" and "text"
+        :param fuzz_string_type: one of the types defined in self.types
+        :return False if the response contains an indication of vulnerability,
+            True if not.
+        """
+        fuzzer = self.fuzzers[fuzz_string_type]
         return fuzzer.verify_response(resp)
         # TODO(ccneill)
         # DO MORE MIDDLEWARE STUFF HERE TO ALLOW BARB + TEMP_LIB TO USE
+
+    def verify_exception(self, method, exc, fuzz_type, *args, **kwargs):
+        """
+        Verify that the proper exception is thrown from a negative test
+
+        :return tuple (response verified (bool), exception if any)
+        """
+        fuzzer = self.fuzzers[fuzz_type]
+        try:
+            resp, model = method(*args, **kwargs)
+            return (fuzzer.verify_response(self.get_standard_resp_obj(
+                resp.status, str(model.to_dict()))), None)
+        except Exception as e:
+            self.assertIsInstance(e, (exc))
+            status = fuzzer.verify_response(self.get_standard_resp_obj(
+                e.resp_body['code'], str(e.resp_body)))
+            self.assertTrue(status)
+            return (status, e)
+
+    def get_standard_resp_obj(self, status_code, text):
+        return {
+            'status_code': int(status_code),
+            'text': text
+        }
 
 
 class GenericFuzzer(object):
@@ -134,7 +165,8 @@ class GenericFuzzer(object):
 
     def verify_response(self, resp):
         if resp['status_code'] >= 500:
-            raise Exception("HTTP ERROR: {0}".format(resp['status_code']))
+            # raise Exception("HTTP ERROR: {0}".format(resp['status_code']))
+            return False
         return True
 
 
@@ -238,7 +270,10 @@ class XSSFuzzer(GenericFuzzer):
 
     def verify_response(self, resp):
         if 'alert(1)' in resp['text']:
-            raise Exception("Possible XSS Vulnerability")
+            return False
+            raise Exception(resp)
+            # raise Exception("Possible XSS Vulnerability")
+        raise Exception(resp)
         return True
 
 
